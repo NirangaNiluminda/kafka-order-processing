@@ -9,6 +9,14 @@ topics:
 
 producer:
   batch_size: 10
+  start_order_id: 1001
+  message_interval_seconds: 0.2
+  # Fraction of messages deliberately made invalid (negative price / empty product)
+  # to exercise the Dead Letter Queue.
+  poison_rate: 0.0
+  # Fraction of messages tagged so the consumer fails them transiently a few times
+  # before succeeding, to exercise the retry topic.
+  flaky_rate: 0.0
   price_range:
     min: 10.0
     max: 500.0
@@ -26,6 +34,9 @@ consumer:
   auto_offset_reset: "earliest"
   enable_auto_commit: false
   poll_timeout_seconds: 1.0
+  # Baseline probability that any given message hits a simulated transient error,
+  # on top of messages explicitly tagged via the producer's flaky_rate.
+  transient_failure_rate: 0.0
 
 retry:
   max_retries: 3

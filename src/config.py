@@ -4,8 +4,7 @@ Reads settings from YAML and exposes them as typed dataclasses
 for safe, validated access throughout the application.
 """
 
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import List
 
@@ -38,9 +37,13 @@ class PriceRange:
 class ProducerConfig:
     """Settings for the order producer."""
     batch_size: int = 10
+    start_order_id: int = 1001
+    message_interval_seconds: float = 0.2
+    poison_rate: float = 0.0
+    flaky_rate: float = 0.0
     price_range: PriceRange = field(default_factory=PriceRange)
     products: List[str] = field(default_factory=lambda: [
-        "Laptop", "Smartphone", "Headphones", "Keyboard", "Monitor"
+        "Laptop", "Smartphone", "Headphones", "Keyboard", "Monitor",
     ])
 
 
@@ -50,6 +53,7 @@ class ConsumerConfig:
     auto_offset_reset: str = "earliest"
     enable_auto_commit: bool = False
     poll_timeout_seconds: float = 1.0
+    transient_failure_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -78,73 +82,57 @@ class AppConfig:
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
 
-def _build_nested(data: dict, cls):
-    """Recursively construct a dataclass from a nested dictionary."""
-    if data is None:
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _build(cls, data):
+    """Recursively construct a (frozen) dataclass from a nested dictionary.
+
+    Unknown keys are ignored; missing keys fall back to the dataclass default.
+    Nested dataclass fields (e.g. ``ProducerConfig.price_range``) are built
+    recursively from their corresponding sub-dictionary.
+    """
+    if not data:
         return cls()
 
-    field_types = {f.name: f.type for f in cls.__dataclass_fields__.values()}
+    field_types = {f.name: f.type for f in fields(cls)}
     kwargs = {}
-
     for key, value in data.items():
-        if key not in field_types:
+        annotation = field_types.get(key)
+        if annotation is None:
             continue
-
-        annotation = field_types[key]
-
-        # Handle nested dataclass fields
-        if isinstance(value, dict) and hasattr(annotation, "__dataclass_fields__"):
-            kwargs[key] = _build_nested(value, annotation)
+        if is_dataclass(annotation) and isinstance(value, dict):
+            kwargs[key] = _build(annotation, value)
         else:
             kwargs[key] = value
-
     return cls(**kwargs)
 
 
 def load_config(config_path: str = None) -> AppConfig:
     """Load application configuration from a YAML file.
 
-    Resolves the config path relative to the project root directory.
-    Falls back to defaults if the file is not found.
-
     Args:
-        config_path: Optional override path to the YAML config file.
+        config_path: Optional override path to the YAML config file. When omitted,
+            ``config/settings.yaml`` under the project root is used.
 
     Returns:
-        Fully populated AppConfig instance.
+        Fully populated ``AppConfig`` instance. Falls back to defaults when the
+        file is absent.
     """
-    if config_path is None:
-        project_root = Path(__file__).resolve().parent.parent
-        config_path = project_root / "config" / "settings.yaml"
-    else:
-        config_path = Path(config_path)
+    path = Path(config_path) if config_path else PROJECT_ROOT / "config" / "settings.yaml"
 
-    if not config_path.exists():
-        print(f"[WARN] Config file not found at {config_path}, using defaults.")
+    if not path.exists():
+        print(f"[WARN] Config file not found at {path}, using defaults.")
         return AppConfig()
 
-    with open(config_path, "r") as f:
+    with open(path, "r") as f:
         raw = yaml.safe_load(f) or {}
 
     return AppConfig(
-        kafka=_build_nested(raw.get("kafka"), KafkaConfig),
-        topics=_build_nested(raw.get("topics"), TopicConfig),
-        producer=_build_nested(
-            _parse_producer_config(raw.get("producer", {})), ProducerConfig
-        ),
-        consumer=_build_nested(raw.get("consumer"), ConsumerConfig),
-        retry=_build_nested(raw.get("retry"), RetryConfig),
-        schema=_build_nested(raw.get("schema"), SchemaConfig),
+        kafka=_build(KafkaConfig, raw.get("kafka")),
+        topics=_build(TopicConfig, raw.get("topics")),
+        producer=_build(ProducerConfig, raw.get("producer")),
+        consumer=_build(ConsumerConfig, raw.get("consumer")),
+        retry=_build(RetryConfig, raw.get("retry")),
+        schema=_build(SchemaConfig, raw.get("schema")),
     )
-
-
-def _parse_producer_config(data: dict) -> dict:
-    """Handle the nested price_range within producer config."""
-    if data is None:
-        return {}
-
-    result = dict(data)
-    if "price_range" in result and isinstance(result["price_range"], dict):
-        result["price_range"] = PriceRange(**result["price_range"])
-
-    return result
