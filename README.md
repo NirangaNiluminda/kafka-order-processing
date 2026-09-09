@@ -115,7 +115,7 @@ Defaults (`config/settings.yaml`): `1s → 2s → 4s`, then DLQ after `max_retri
 kafka-order-processing/
 ├── docker-compose.yml           # Kafka + Zookeeper (+ optional kafka-ui), topic init
 ├── requirements.txt / requirements-dev.txt
-├── Makefile                     # up / down / test / produce / consume / dlq
+├── Makefile                     # task runner: install / ui / produce / consume / down ...
 ├── pytest.ini
 ├── schemas/order.avsc           # Avro schema for order messages
 ├── config/settings.yaml         # all tunables
@@ -138,43 +138,56 @@ kafka-order-processing/
 
 ---
 
-## Quick start
+## Quick start (via `make`)
 
-### 1. Infrastructure
-
-```bash
-docker compose up -d
-docker compose logs kafka-init      # wait for: orders / orders-retry / orders-dlq
-```
-
-### 2. Dependencies
+Everything runs through `make` — no `docker` or `python` commands to remember.
+Run `make` on its own for the full target list, `make doctor` to check your setup.
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt          # or: requirements-dev.txt to also get pytest
-```
+make install          # 1. build the virtualenv (~/.venvs/) + install deps
+make ui               # 2. start Kafka + Zookeeper + kafka-ui (:8080), create topics
 
-### 3. Run
+make consume          # 3a. terminal A — the pipeline
+make produce N=30 FLAKY=0.3 POISON=0.2   # 3b. terminal B — send orders
 
-```bash
-# terminal A
-python run_consumer.py
-
-# terminal B — clean batch, then failures
-python run_producer.py --count 30
-python run_producer.py --count 30 --flaky-rate 0.3 --poison-rate 0.2
+make down             # 4. stop everything  (make reset = also wipe topics)
 ```
 
 `Ctrl-C` the consumer to print the aggregation summary.
-
 Full narrated walkthrough: **[`docs/DEMO.md`](docs/DEMO.md)**.
 
-### 4. Teardown
+### `make` targets
+
+| Target | Does |
+|---|---|
+| `install` / `reinstall` | create / rebuild the virtualenv and install dependencies |
+| `test` | run the unit suite (`pytest`) |
+| `ui` (`start`) | start Kafka + Zookeeper + kafka-ui at <http://localhost:8080> |
+| `up` | start Kafka + Zookeeper only |
+| `stop` / `down` / `reset` | pause / remove containers / remove + wipe all data |
+| `restart` | recreate the stack cleanly (fixes stale container/network errors) |
+| `produce` | send orders — vars `N POISON FLAKY INTERVAL` (e.g. `make produce N=100`) |
+| `consume` | run the consumer |
+| `dlq` | dump the Dead Letter Queue with headers |
+| `topics` / `groups` / `logs` | inspect topics / consumer-group lag / broker log |
+| `demo` | start the stack and fire a mixed batch in one command |
+| `doctor` | check docker, compose and the virtualenv are usable |
+
+The virtualenv lives **outside** the repo (`~/.venvs/kafka-order-processing`) because
+this tree is on a `noexec` mount; override with `make <target> VENV=/path`.
+
+### Manual equivalents
+
+<details><summary>without <code>make</code></summary>
 
 ```bash
-docker compose down -v
+docker compose --profile tools up -d
+python3 -m venv ~/.venvs/kop && ~/.venvs/kop/bin/python -m pip install -r requirements-dev.txt
+~/.venvs/kop/bin/python run_consumer.py
+~/.venvs/kop/bin/python run_producer.py --count 30 --flaky-rate 0.3 --poison-rate 0.2
+docker compose --profile tools down -v
 ```
+</details>
 
 ---
 
@@ -207,8 +220,7 @@ run_consumer.py  --group ID  --transient-rate 0..1  --bootstrap HOST:PORT
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-pytest
+make test
 ```
 
 Covers the Avro codec (round-trip + malformed input), the aggregator math, the
@@ -224,10 +236,10 @@ model validation, and config loading. No running Kafka required.
 docker exec -it kafka kafka-console-consumer --bootstrap-server localhost:9092 \
   --topic orders-dlq --from-beginning --property print.headers=true
 
-# list topics / describe consumer group
+# list topics / describe consumer group   (or: make topics / make groups)
 docker exec -it kafka kafka-topics --bootstrap-server localhost:9092 --list
 docker exec -it kafka kafka-consumer-groups --bootstrap-server localhost:9092 \
   --describe --group order-processing-group
 ```
 
-Or start the web UI: `docker compose --profile tools up -d` → <http://localhost:8080>.
+Or use the web UI: `make ui` → <http://localhost:8080>.

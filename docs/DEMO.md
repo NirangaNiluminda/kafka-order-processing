@@ -4,51 +4,40 @@ A ~5 minute walkthrough that exercises every assignment requirement: Avro
 messaging, real-time aggregation, retry-on-transient-failure, and the Dead Letter
 Queue.
 
+Everything runs through `make` — no `docker` or `python` commands to type.
+Run `make` on its own to see all targets. Check readiness any time with
+`make doctor`.
+
 ## 0. One-time setup
 
 ```bash
-make install          # venv + dependencies
+make install          # builds the virtualenv (in ~/.venvs/) and installs deps
 ```
 
-## 1. Start Kafka and create the topics
+## 1. Start Kafka + the web UI
 
 ```bash
-make up               # docker compose up -d, then shows kafka-init logs
+make ui               # Kafka + Zookeeper + kafka-ui, creates the 3 topics
 ```
 
-Wait until `kafka-init` prints:
+Wait until `kafka-init` has printed `orders`, `orders-retry`, `orders-dlq`
+(`make topics` to re-check), then open <http://localhost:8080>.
 
-```
-orders
-orders-dlq
-orders-retry
-```
-
-*(Optional)* start the web UI and open <http://localhost:8080>:
+## 2. Start the consumer — terminal A
 
 ```bash
-make ui
-```
-
-## 2. Start the consumer
-
-In **terminal A**:
-
-```bash
-make consume          # == venv/bin/python run_consumer.py
+make consume
 ```
 
 It subscribes to `orders` **and** `orders-retry` and waits.
 
-## 3. Produce a clean batch — show Avro + aggregation
-
-In **terminal B**:
+## 3. Clean batch — show Avro + aggregation — terminal B
 
 ```bash
-venv/bin/python run_producer.py --count 20 --interval 0.3
+make produce N=20 INTERVAL=0.3 FLAKY=0 POISON=0
 ```
 
-Terminal A shows, after every message:
+Terminal A, after every message:
 
 ```
 [OK]  Order(id=1003, product=Monitor, price=$312.40)  (from orders, attempt 1)
@@ -62,7 +51,7 @@ Talking points:
 ## 4. Inject transient failures — show the retry topic
 
 ```bash
-venv/bin/python run_producer.py --count 20 --interval 0.3 --flaky-rate 0.4
+make produce N=20 INTERVAL=0.3 FLAKY=0.4 POISON=0
 ```
 
 Flaky messages carry an `x-fail-times` header. Terminal A shows the retry loop:
@@ -80,7 +69,7 @@ until it succeeds. Point out it came back `from orders-retry`.
 ## 5. Inject poison messages — show the DLQ
 
 ```bash
-venv/bin/python run_producer.py --count 20 --interval 0.3 --poison-rate 0.3
+make produce N=20 INTERVAL=0.3 FLAKY=0 POISON=0.3
 ```
 
 Poison messages have a negative price or empty product. Terminal A:
@@ -95,9 +84,7 @@ A message that stays transient past `max_retries` also lands in the DLQ:
 [DLQ] 1058 reason='max retries exceeded' detail='transient failure on attempt 4' retry_count=3
 ```
 
-## 6. Inspect the Dead Letter Queue
-
-In **terminal C**:
+## 6. Inspect the Dead Letter Queue — terminal C
 
 ```bash
 make dlq
@@ -112,6 +99,9 @@ x-error-reason:order validation failed,x-error-class:ValueError,
 x-error-detail:price must be non-negative, got -254.75999450683594,
 x-failed-at:2026-09-09T03:13:15.795272+00:00,x-retry-count:0    <avro bytes>
 ```
+
+Also visible in the UI: **Topics → orders-dlq → Messages → expand a row → Headers**.
+And `make groups` shows the consumer-group lag settling back to 0.
 
 ## 7. Stop and show the summary
 
@@ -130,5 +120,12 @@ x-failed-at:2026-09-09T03:13:15.795272+00:00,x-retry-count:0    <avro bytes>
 ## 8. Teardown
 
 ```bash
-make down             # docker compose down -v
+make down             # stop + remove containers (topics/messages kept)
+make reset            # ...or wipe everything for a clean re-run
+```
+
+## One-command version
+
+```bash
+make demo             # starts the stack + fires a mixed batch; then run `make consume`
 ```
