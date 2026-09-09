@@ -24,5 +24,10 @@ env/
 .DS_Store
 Thumbs.db
 
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+
 # Logs
 *.log

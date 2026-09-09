@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "Order",
+  "namespace": "com.bigdata.orders",
+  "doc": "Represents a purchase transaction in the order processing system.",
+  "fields": [
+    {
+      "name": "orderId",
+      "type": "string",
+      "doc": "Unique identifier for the order (e.g., '1001', '1002')"
+    },
+    {
+      "name": "product",
+      "type": "string",
+      "doc": "Name of the purchased item (e.g., 'Laptop', 'Smartphone')"
+    },
+    {
+      "name": "price",
+      "type": "float",
+      "doc": "Price of the product in the default currency"
+    }
+  ]
+}
