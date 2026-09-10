@@ -6,7 +6,9 @@ are simulated here in a controlled, demonstrable way:
 
 * If a message carries an ``x-fail-times: N`` header (set by the producer's
   ``--flaky-rate``), it fails **transiently** on its first ``N`` attempts and
-  succeeds afterwards -- a deterministic way to show the retry topic working.
+  succeeds afterwards -- a deterministic way to show the retry topic working. If
+  ``N`` exceeds ``retry.max_retries`` the message never succeeds and the consumer
+  routes it to the DLQ as "max retries exceeded".
 * Otherwise, each message fails transiently with probability ``transient_rate``.
 
 Permanent failures are *not* simulated here -- they arise naturally from Avro

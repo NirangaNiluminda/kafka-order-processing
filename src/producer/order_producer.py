@@ -6,8 +6,9 @@ so the consumer's fault-tolerance can be demonstrated live:
 * **poison** messages -- structurally decodable but invalid (negative price or
   empty product). The consumer sends these straight to the DLQ.
 * **flaky** messages -- valid, but tagged with an ``x-fail-times`` header telling
-  the consumer to fail them transiently N times before succeeding. These travel
-  through the retry topic.
+  the consumer to fail them transiently N times. Most travel through the retry
+  topic and then succeed; some are tagged to fail more times than the retry
+  budget allows and end up in the DLQ as "max retries exceeded".
 """
 
 import random
@@ -66,7 +67,14 @@ class OrderProducer:
         return {"orderId": order_id, "product": product, "price": price}
 
     def _flaky_headers(self) -> list:
-        fail_times = random.randint(1, self.config.retry.max_retries)
+        # Two outcomes worth demonstrating: most flaky messages recover after
+        # 1..max_retries transient failures; roughly a third never recover and
+        # end up in the DLQ with "max retries exceeded".
+        max_retries = self.config.retry.max_retries
+        if random.random() < 0.34:
+            fail_times = max_retries + 1
+        else:
+            fail_times = random.randint(1, max_retries)
         return [("x-fail-times", str(fail_times).encode())]
 
     # -- main loop -----------------------------------------------------------
@@ -76,11 +84,13 @@ class OrderProducer:
         interval: float = None,
         poison_rate: float = None,
         flaky_rate: float = None,
+        start_id: int = None,
     ) -> ProduceStats:
         pcfg = self.config.producer
         interval = pcfg.message_interval_seconds if interval is None else interval
         poison_rate = pcfg.poison_rate if poison_rate is None else poison_rate
         flaky_rate = pcfg.flaky_rate if flaky_rate is None else flaky_rate
+        start_id = pcfg.start_order_id if start_id is None else start_id
 
         print(
             f"Producing {count} orders to '{self.topic}' "
@@ -88,7 +98,7 @@ class OrderProducer:
         )
 
         for i in range(count):
-            order_id = str(pcfg.start_order_id + i)
+            order_id = str(start_id + i)
             is_poison = random.random() < poison_rate
             is_flaky = (not is_poison) and random.random() < flaky_rate
 

@@ -21,6 +21,8 @@ def parse_args() -> argparse.Namespace:
                    help="fraction of messages made invalid, 0..1 (default: config)")
     p.add_argument("--flaky-rate", type=float, default=None,
                    help="fraction of messages tagged to fail transiently (default: config)")
+    p.add_argument("--start-id", type=int, default=None,
+                   help="first order id to use (default: config); set per batch to keep ids distinct")
     p.add_argument("--bootstrap", default=None, help="override Kafka bootstrap servers")
     return p.parse_args()
 
@@ -34,6 +36,7 @@ def main() -> None:
         interval=args.interval,
         poison_rate=args.poison_rate,
         flaky_rate=args.flaky_rate,
+        start_id=args.start_id,
     )
 
 

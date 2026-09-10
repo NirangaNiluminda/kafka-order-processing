@@ -22,6 +22,7 @@ N           ?= 50
 POISON      ?= 0.1
 FLAKY       ?= 0.2
 INTERVAL    ?= 0.2
+START       ?= 1001
 
 .DEFAULT_GOAL := help
 .PHONY: help env install reinstall test \
@@ -36,7 +37,7 @@ help:  ## Show this help
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-11s\033[0m %s\n", $$1, $$2}'
 	@echo
 	@echo "Override vars:  VENV=$(VENV)"
-	@echo "               N=$(N) POISON=$(POISON) FLAKY=$(FLAKY) INTERVAL=$(INTERVAL)"
+	@echo "               N=$(N) POISON=$(POISON) FLAKY=$(FLAKY) INTERVAL=$(INTERVAL) START=$(START)"
 
 # ---- python environment ------------------------------------------------
 $(STAMP): requirements.txt requirements-dev.txt
@@ -99,22 +100,24 @@ groups:  ## Show consumer-group offsets and lag
 	  --describe --group order-processing-group
 
 # ---- run the pipeline ------------------------------------------------
-produce: $(STAMP)  ## Send orders (vars: N POISON FLAKY INTERVAL)
+produce: $(STAMP)  ## Send orders (vars: N POISON FLAKY INTERVAL START)
 	$(PYTHON) run_producer.py --count $(N) --poison-rate $(POISON) \
-	  --flaky-rate $(FLAKY) --interval $(INTERVAL)
+	  --flaky-rate $(FLAKY) --interval $(INTERVAL) --start-id $(START)
 
 consume: $(STAMP)  ## Run the consumer (Ctrl-C stops it and prints the summary)
 	-$(PYTHON) run_consumer.py
 
 dlq:  ## Dump the Dead Letter Queue with headers (exits after 5s idle)
-	-docker exec -i kafka kafka-console-consumer \
+	@echo "+ kafka-console-consumer --topic orders-dlq --from-beginning --property print.headers=true"
+	@docker exec -i kafka kafka-console-consumer \
 	  --bootstrap-server localhost:9092 --topic orders-dlq \
-	  --from-beginning --timeout-ms 5000 --property print.headers=true
+	  --from-beginning --timeout-ms 5000 --property print.headers=true 2>&1 \
+	  | grep -avE '^\[[0-9]{4}-|TimeoutException|^[[:space:]]+at ' || true
 
 demo: $(STAMP)  ## Start the stack and send a lively batch, then tells you what's next
 	$(MAKE) ui
-	@echo ">>> giving Kafka a few seconds..."
-	@sleep 6
+	@echo ">>> giving Kafka time to elect a coordinator..."
+	@sleep 15
 	$(PYTHON) run_producer.py --count $(N) --poison-rate 0.2 --flaky-rate 0.3 --interval 0.1
 	@echo
 	@echo ">>> now run:  make consume     (Ctrl-C it to see the running-average summary)"
